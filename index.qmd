@@ -1,0 +1,208 @@
+---
+title: "Gapminder EDA 대시보드"
+author: "강은빈"
+date: "2026-06-27"
+lang: ko
+format:
+  dashboard:
+    theme: cosmo
+execute:
+  warning: false
+  message: false
+knitr:
+  opts_chunk:
+    dev: "png"
+    dpi: 110
+---
+
+```{r setup}
+#| include: false
+options(scipen = 100)
+input_candidates <- c(file.path("data", "gapminder.csv"),
+                      file.path("..", "data", "gapminder.csv"))
+input_path <- input_candidates[file.exists(input_candidates)][1]
+stopifnot(!is.na(input_path))
+
+df <- read.csv(input_path, stringsAsFactors = FALSE, encoding = "UTF-8")
+df <- df[order(df$country, df$year), ]
+
+continents <- sort(unique(df$continent))
+pal <- setNames(
+  c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00",
+    "#A65628", "#F781BF")[seq_along(continents)], continents)
+years    <- sort(unique(df$year))
+latest   <- max(years); earliest <- min(years)
+kab <- function(x, ...) knitr::kable(x, ...)
+
+# 핵심 지표 사전 계산 — 기대수명(생명) 중심
+n_country  <- length(unique(df$country))
+life_now   <- mean(df$lifeExp[df$year == latest])      # 2007년 세계 평균 기대수명
+life_past  <- mean(df$lifeExp[df$year == earliest])    # 1952년 세계 평균 기대수명
+life_gain  <- life_now - life_past                     # 55년간 증가폭
+sub        <- df[df$year == latest, ]
+life_max   <- sub[which.max(sub$lifeExp), ]            # 최장수국 (일본)
+life_min   <- sub[which.min(sub$lifeExp), ]            # 최단명국 (스와질란드)
+life_gap   <- life_max$lifeExp - life_min$lifeExp      # 최고-최저 격차
+fit        <- lm(lifeExp ~ log10(gdpPercap), data = sub)
+sub$resid  <- residuals(fit)
+r2         <- summary(fit)$r.squared
+```
+
+# 개요
+
+## Row {height="22%"}
+
+```{r}
+#| content: valuebox
+#| title: "세계 평균 기대수명 (2007년)"
+list(icon = "heart-pulse", color = "primary", value = sprintf("%.1f세", life_now))
+```
+
+```{r}
+#| content: valuebox
+#| title: "55년간 기대수명 증가 (1952→2007)"
+list(icon = "graph-up-arrow", color = "success", value = sprintf("+%.1f세", life_gain))
+```
+
+```{r}
+#| content: valuebox
+#| title: "최고–최저 기대수명 격차 (2007년)"
+list(icon = "distribute-vertical", color = "danger",
+     value = sprintf("%.1f세", life_gap))
+```
+
+## Row {height="78%"}
+
+### Column {width="42%"}
+
+```{r}
+#| title: "기대수명 분포 변화 (국가 수): 이봉 → 단봉 수렴"
+brk <- c(0, 40, 50, 60, 70, 80, Inf)
+lab <- c("< 40", "40–50", "50–60", "60–70", "70–80", "80+")
+t52 <- table(cut(df$lifeExp[df$year == earliest], brk, lab, right = FALSE))
+t07 <- table(cut(df$lifeExp[df$year == latest],   brk, lab, right = FALSE))
+data.frame(`기대수명 구간` = lab,
+           `1952년` = as.integer(t52),
+           `2007년` = as.integer(t07),
+           check.names = FALSE) |>
+  kab(align = "lrr")
+```
+
+### Column {width="58%"}
+
+```{r}
+#| title: "대륙별 평균 기대수명 추세 (연도별)"
+life_trend <- tapply(df$lifeExp, list(df$year, df$continent), mean)
+ct <- as.data.frame(round(t(life_trend), 1))
+ct <- cbind(`대륙` = rownames(ct), ct)
+kab(ct, row.names = FALSE, align = c("l", rep("r", length(years))))
+```
+
+# 소득과 수명
+
+## Row
+
+### Column {width="58%"}
+
+```{r}
+#| title: "기대수명 vs 1인당 GDP (버블=인구, 점선=회귀선)"
+plot(sub$gdpPercap, sub$lifeExp, log = "x", pch = 19,
+     col = pal[sub$continent], cex = sqrt(sub$pop) / 12000,
+     xlab = "1인당 GDP (log)", ylab = "기대수명")
+xx <- seq(min(sub$gdpPercap), max(sub$gdpPercap), length.out = 100)
+lines(xx, predict(fit, data.frame(gdpPercap = xx)), col = "grey30", lwd = 2, lty = 2)
+legend("bottomright", legend = names(pal), col = pal, pch = 19, bty = "n")
+```
+
+### Column {width="42%"}
+
+```{r}
+#| title: "소득 대비 수명 ↑ (양의 잔차)"
+head(sub[order(-sub$resid), c("country", "gdpPercap", "lifeExp", "resid")], 5) |>
+  kab(row.names = FALSE, digits = 1)
+```
+
+```{r}
+#| title: "소득 대비 수명 ↓ (음의 잔차, HIV 직격)"
+head(sub[order(sub$resid), c("country", "gdpPercap", "lifeExp", "resid")], 5) |>
+  kab(row.names = FALSE, digits = 1)
+```
+
+# 수렴과 충격
+
+## Row {height="55%"}
+
+### Column
+
+```{r}
+#| title: "국가 간 기대수명 격차 (수렴 → 발산)"
+disp <- data.frame(
+  year = years,
+  sd   = as.numeric(tapply(df$lifeExp, df$year, sd))
+)
+plot(disp$year, disp$sd, type = "o", pch = 19, col = "#377EB8", lwd = 2.5,
+     xlab = "연도", ylab = "국가 간 기대수명 표준편차")
+abline(v = disp$year[which.min(disp$sd)], lty = 2, col = "grey60")
+```
+
+### Column
+
+```{r}
+#| title: "연도별 GDP–수명 상관계수 추이"
+cor_by_year <- sapply(years, function(y) {
+  d <- df[df$year == y, ]; cor(d$lifeExp, log10(d$gdpPercap))
+})
+plot(years, cor_by_year, type = "o", pch = 19, col = "#4DAF4A", lwd = 2.5,
+     ylim = c(0.7, 0.9), xlab = "연도", ylab = "상관계수")
+abline(v = years[which.max(cor_by_year)], lty = 2, col = "grey60")
+```
+
+## Row {height="45%"}
+
+### Column
+
+```{r}
+#| title: "기대수명 급락 충격 Top 10 (역사적 사건과 일치)"
+df$d_life <- ave(df$lifeExp, df$country, FUN = function(x) c(NA, diff(x)))
+shocks <- df[order(df$d_life), c("country", "year", "lifeExp", "d_life", "continent")]
+head(shocks[!is.na(shocks$d_life), ], 10) |>
+  kab(row.names = FALSE, digits = 1)
+```
+
+### Column
+
+```{r}
+#| title: "장기 변화 최대 증가 / 감소 (1952 → 2007)"
+a <- df[df$year == earliest, c("country", "lifeExp")]
+b <- df[df$year == latest,   c("country", "lifeExp")]
+ch <- merge(a, b, by = "country", suffixes = c("_52", "_07"))
+ch$delta <- ch$lifeExp_07 - ch$lifeExp_52
+ch <- ch[order(-ch$delta), ]
+rbind(head(ch, 5), tail(ch, 5)) |>
+  kab(row.names = FALSE, digits = 1)
+```
+
+# 대륙별
+
+## Row
+
+### Column
+
+```{r}
+#| title: "대륙별 평균 기대수명 추세"
+matplot(years, life_trend, type = "o", pch = 19, lty = 1, lwd = 2.5,
+        col = pal[colnames(life_trend)], xlab = "연도", ylab = "평균 기대수명")
+legend("bottomright", legend = colnames(life_trend),
+       col = pal[colnames(life_trend)], lwd = 2.5, bty = "n")
+```
+
+### Column
+
+```{r}
+#| title: "대륙별 1인당 GDP 중앙값 추세 (log)"
+gdp_trend <- tapply(df$gdpPercap, list(df$year, df$continent), median)
+matplot(years, gdp_trend, type = "o", pch = 19, lty = 1, lwd = 2.5, log = "y",
+        col = pal[colnames(gdp_trend)], xlab = "연도", ylab = "1인당 GDP (log)")
+legend("topleft", legend = colnames(gdp_trend),
+       col = pal[colnames(gdp_trend)], lwd = 2.5, bty = "n")
+```

@@ -2,3 +2,9 @@
 .Rhistory
 .RData
 .Ruserdata
+
+/.quarto/
+**/*.quarto_ipynb
+
+# eda.R 분석 산출물(재현 가능, 추적 불필요)
+/output/

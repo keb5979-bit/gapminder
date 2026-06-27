@@ -1,0 +1,22 @@
+project:
+  type: website
+  output-dir: docs
+
+website:
+  title: "Gapminder EDA"
+  navbar:
+    background: primary
+    left:
+      - href: index.qmd
+        text: "대시보드"
+      - href: eda-report.qmd
+        text: "EDA 보고서"
+      - href: data-quality.qmd
+        text: "데이터 품질"
+
+lang: ko
+
+format:
+  html:
+    theme: cosmo
+    toc: true
