@@ -37,15 +37,26 @@ latest   <- max(years); earliest <- min(years)
 pal <- c(Africa   = "#E15759", Americas = "#F28E2B", Asia = "#4E79A7",
          Europe   = "#59A14F", Oceania  = "#B07AA1")
 
+GAP_FONT <- "Pretendard, 'Malgun Gothic', sans-serif"
+
 theme_gap <- function(base = 13) {
-  theme_minimal(base_size = base) +
+  theme_minimal(base_size = base, base_family = "sans") +
     theme(panel.grid.minor = element_blank(),
           panel.grid.major = element_line(color = "#ececec"),
           plot.title  = element_text(face = "bold"),
           legend.position = "bottom",
           legend.title = element_blank())
 }
-ax <- function(t) list(title = t, gridcolor = "#ededed", zeroline = FALSE)
+
+# 모든 plotly 차트에 일관된 폰트·호버·투명 배경 적용
+gap_layout <- function(p, legend_y = -0.18) {
+  layout(p,
+         font = list(family = GAP_FONT, color = "#34495e", size = 13),
+         hoverlabel = list(font = list(family = GAP_FONT, size = 13),
+                           bgcolor = "white", bordercolor = "#dfe4e9"),
+         paper_bgcolor = "rgba(0,0,0,0)", plot_bgcolor = "rgba(0,0,0,0)",
+         legend = list(orientation = "h", x = 0, y = legend_y))
+}
 
 # 핵심 지표 (기대수명 = 생명 중심)
 life_now  <- mean(df$lifeExp[df$year == latest])
@@ -108,6 +119,7 @@ plot_ly(
   animation_opts(900, easing = "cubic-in-out", redraw = FALSE) |>
   animation_slider(currentvalue = list(prefix = "연도 ",
                                         font = list(size = 18, color = "#2c3e50"))) |>
+  gap_layout() |>
   config(displayModeBar = FALSE)
 ```
 
@@ -149,8 +161,8 @@ plot_ly(sub, x = ~gdpPercap, y = ~lifeExp, color = ~continent, colors = pal,
             line = list(color = "#555", dash = "dash"), hoverinfo = "skip") |>
   layout(xaxis = list(type = "log", title = "1인당 GDP (로그)",
                       gridcolor = "#ededed", zeroline = FALSE),
-         yaxis = list(title = "기대수명 (년)", gridcolor = "#ededed", zeroline = FALSE),
-         legend = list(orientation = "h", x = 0, y = -0.18)) |>
+         yaxis = list(title = "기대수명 (년)", gridcolor = "#ededed", zeroline = FALSE)) |>
+  gap_layout() |>
   config(displayModeBar = FALSE)
 ```
 
@@ -164,6 +176,7 @@ resid_tab <- rbind(
 )[, c("유형", "country", "continent", "gdpPercap", "lifeExp", "resid")]
 
 datatable(resid_tab, rownames = FALSE,
+          class = "compact stripe hover",
           colnames = c("유형", "국가", "대륙", "1인당GDP", "기대수명", "잔차"),
           options = list(dom = "t", pageLength = 10, ordering = FALSE,
                          columnDefs = list(list(className = "dt-center", targets = "_all")))) |>
@@ -188,8 +201,7 @@ g1 <- ggplot(lt, aes(year, lifeExp, color = continent, group = continent,
   geom_line(linewidth = 1) + geom_point(size = 1.4) +
   scale_color_manual(values = pal) + theme_gap() +
   labs(x = NULL, y = "평균 기대수명 (년)")
-ggplotly(g1, tooltip = "text") |> config(displayModeBar = FALSE) |>
-  layout(legend = list(orientation = "h", y = -0.15))
+ggplotly(g1, tooltip = "text") |> gap_layout() |> config(displayModeBar = FALSE)
 ```
 
 ### Column
@@ -204,8 +216,7 @@ g2 <- ggplot(gt, aes(year, gdpPercap, color = continent, group = continent,
   scale_color_manual(values = pal) +
   scale_y_log10(labels = scales::label_dollar()) + theme_gap() +
   labs(x = NULL, y = "1인당 GDP 중앙값 (로그)")
-ggplotly(g2, tooltip = "text") |> config(displayModeBar = FALSE) |>
-  layout(legend = list(orientation = "h", y = -0.15))
+ggplotly(g2, tooltip = "text") |> gap_layout() |> config(displayModeBar = FALSE)
 ```
 
 ## Row {height="45%"}
@@ -225,7 +236,7 @@ g3 <- ggplot(disp, aes(year, sd)) +
            label = paste0(peak, " 수렴 정점\n이후 발산 (HIV/AIDS)"),
            color = "#c62828", size = 3.6, fontface = "bold") +
   theme_gap() + labs(x = NULL, y = "국가 간 기대수명 표준편차")
-ggplotly(g3, tooltip = c("x", "y")) |> config(displayModeBar = FALSE)
+ggplotly(g3, tooltip = c("x", "y")) |> gap_layout() |> config(displayModeBar = FALSE)
 ```
 
 ### Column {width="38%"}
@@ -257,6 +268,7 @@ shk <- head(df[order(df$d_life), c("country", "year", "lifeExp", "d_life", "cont
 shk$event <- ifelse(is.na(ev[shk$country]), "—", ev[shk$country])
 datatable(shk[, c("country", "year", "d_life", "lifeExp", "event")],
           rownames = FALSE,
+          class = "compact stripe hover",
           colnames = c("국가", "연도", "변화(년)", "기대수명", "추정 원인"),
           options = list(dom = "t", pageLength = 10,
                          columnDefs = list(list(className = "dt-center", targets = 0:3)))) |>
@@ -275,6 +287,5 @@ g4 <- ggplot(ds, aes(year, lifeExp, color = country, group = country,
   geom_line(linewidth = 1) + geom_point(size = 1.3) +
   scale_color_brewer(palette = "Dark2") + theme_gap() +
   labs(x = NULL, y = "기대수명 (년)")
-ggplotly(g4, tooltip = "text") |> config(displayModeBar = FALSE) |>
-  layout(legend = list(orientation = "h", y = -0.15))
+ggplotly(g4, tooltip = "text") |> gap_layout() |> config(displayModeBar = FALSE)
 ```
