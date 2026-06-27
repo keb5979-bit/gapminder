@@ -1,0 +1,291 @@
+---
+title: "Gapminder 탐색적 데이터 분석(EDA) 보고서"
+author: "강은빈"
+date: "2026-06-27"
+lang: ko
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "목차"
+    number-sections: true
+    code-fold: true
+    code-tools: true
+    embed-resources: true
+    theme: cosmo
+    fig-width: 9
+    fig-height: 6
+execute:
+  warning: false
+  message: false
+knitr:
+  opts_chunk:
+    dev: "png"
+    dpi: 110
+---
+
+```{r setup}
+#| include: false
+knitr::opts_chunk$set(comment = "#>")
+options(scipen = 100)
+
+# 데이터 로드 (이 .qmd는 프로젝트 루트 기준으로 렌더링한다고 가정)
+# document/ 안에서 렌더링되면 한 단계 위의 data 폴더를 참조
+input_candidates <- c(
+  file.path("data", "gapminder.csv"),
+  file.path("..", "data", "gapminder.csv")
+)
+input_path <- input_candidates[file.exists(input_candidates)][1]
+stopifnot(!is.na(input_path))
+
+df <- read.csv(input_path, stringsAsFactors = FALSE, encoding = "UTF-8")
+df <- df[order(df$country, df$year), ]
+
+continents <- sort(unique(df$continent))
+pal <- setNames(
+  c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00",
+    "#A65628", "#F781BF")[seq_along(continents)], continents)
+years    <- sort(unique(df$year))
+latest   <- max(years)
+earliest <- min(years)
+
+skew <- function(x) { m <- mean(x); mean(((x - m) / sd(x))^3) }
+iqr_flag <- function(x) {
+  q <- quantile(x, c(.25, .75)); h <- 1.5 * diff(q)
+  x < q[1] - h | x > q[2] + h
+}
+kab <- function(x, ...) knitr::kable(x, ...)
+```
+
+> **핵심 결론:** 소득은 기대수명을 강하게 예측하지만(R² = 0.65), 1990년대 이후
+> HIV/AIDS 충격이 이 관계를 깨뜨리며 **국가 간 격차가 다시 벌어졌다(수렴 → 발산).**
+
+# 데이터 개요
+
+```{r overview}
+data.frame(
+  지표 = c("관측치", "변수", "국가 수", "대륙 수", "기간", "시점 수"),
+  값   = c(nrow(df), ncol(df), length(unique(df$country)),
+           length(continents), sprintf("%d ~ %d", earliest, latest),
+           length(years))
+) |> kab(align = "lr")
+
+summary(df[, c("pop", "lifeExp", "gdpPercap")])
+```
+
+# 분포 진단 및 이상치 탐지
+
+`pop`과 `gdpPercap`은 강한 우편향으로 로그 변환이 필요하다.
+
+```{r dist-skew}
+skew_tab <- data.frame(
+  변수        = c("pop", "lifeExp", "gdpPercap"),
+  왜도        = sapply(c("pop", "lifeExp", "gdpPercap"), function(c) round(skew(df[[c]]), 2)),
+  IQR_이상치  = sapply(c("pop", "lifeExp", "gdpPercap"), function(c) sum(iqr_flag(df[[c]]))),
+  row.names = NULL
+)
+skew_tab$이상치_비율 <- sprintf("%.1f%%", 100 * skew_tab$IQR_이상치 / nrow(df))
+kab(skew_tab, align = "lrrr")
+```
+
+```{r dist-hist, fig.width=12, fig.height=4}
+#| fig-cap: "주요 변수 분포 (인구·GDP는 log10)"
+par(mfrow = c(1, 3))
+hist(df$lifeExp, breaks = 30, col = "#377EB8", border = "white",
+     main = "기대수명", xlab = "lifeExp")
+hist(log10(df$pop), breaks = 30, col = "#4DAF4A", border = "white",
+     main = "인구 (log10)", xlab = "log10(pop)")
+hist(log10(df$gdpPercap), breaks = 30, col = "#E41A1C", border = "white",
+     main = "1인당 GDP (log10)", xlab = "log10(gdpPercap)")
+```
+
+극단적 고소득 관측치는 대부분 **쿠웨이트(석유경제)** — GDP는 압도적이나 기대수명은 그에 못 미친다.
+
+```{r dist-extreme}
+head(df[order(-df$gdpPercap),
+        c("country", "year", "gdpPercap", "lifeExp", "continent")], 8) |>
+  kab(row.names = FALSE, digits = 1)
+```
+
+# 분포의 시간적 변화 (이봉 → 단봉 수렴)
+
+1952년은 빈국(~40세)/부국(~70세)의 **두 봉우리**, 2007년은 우측 **단봉**으로 수렴한다.
+
+```{r density-shift}
+#| fig-cap: "기대수명 분포 변화 (1952 vs 2007)"
+d0 <- density(df$lifeExp[df$year == earliest])
+d1 <- density(df$lifeExp[df$year == latest])
+plot(d0, col = "#E41A1C", lwd = 2.5, ylim = range(d0$y, d1$y),
+     main = sprintf("기대수명 분포 변화 (%d vs %d)", earliest, latest),
+     xlab = "기대수명")
+lines(d1, col = "#377EB8", lwd = 2.5)
+legend("topleft", legend = c(earliest, latest),
+       col = c("#E41A1C", "#377EB8"), lwd = 2.5, bty = "n")
+```
+
+# 상관관계와 시간적 추이
+
+전체 기간 `lifeExp ~ log10(gdpPercap)` 상관은 0.81로 강하다. 다만 연도별로 보면
+1987년까지 강해지다 이후 약화된다 — 소득만으로 설명 안 되는 충격(HIV)의 신호.
+
+```{r cor-year}
+#| fig-cap: "연도별 lifeExp ~ log10(gdpPercap) 상관계수"
+cor_by_year <- sapply(years, function(y) {
+  d <- df[df$year == y, ]; cor(d$lifeExp, log10(d$gdpPercap))
+})
+plot(years, cor_by_year, type = "o", pch = 19, col = "#377EB8", lwd = 2.5,
+     ylim = c(0.7, 0.9), xlab = "연도", ylab = "상관계수",
+     main = "기대수명 ~ log10(GDP) 상관계수 추이")
+abline(v = years[which.max(cor_by_year)], lty = 2, col = "grey60")
+```
+
+# 회귀 잔차분석 — 소득으로 설명되지 않는 국가
+
+`lifeExp = a + b·log10(gdpPercap)` 적합 후 잔차로 과/저성과 국가를 식별한다.
+
+```{r reg}
+sub <- df[df$year == latest, ]
+fit <- lm(lifeExp ~ log10(gdpPercap), data = sub)
+sub$resid <- residuals(fit)
+cat(sprintf("모형: lifeExp = %.1f + %.1f * log10(gdpPercap),  R^2 = %.3f\n",
+            coef(fit)[1], coef(fit)[2], summary(fit)$r.squared))
+```
+
+```{r reg-over}
+head(sub[order(-sub$resid),
+         c("country", "continent", "gdpPercap", "lifeExp", "resid")], 5) |>
+  kab(row.names = FALSE, digits = 1, caption = "소득 대비 기대수명이 높은 국가 (양의 잔차)")
+```
+
+```{r reg-under}
+head(sub[order(sub$resid),
+         c("country", "continent", "gdpPercap", "lifeExp", "resid")], 5) |>
+  kab(row.names = FALSE, digits = 1, caption = "소득 대비 기대수명이 낮은 국가 (음의 잔차) — HIV 직격")
+```
+
+보츠와나·적도기니는 1인당 GDP 1만 달러 이상인데도 기대수명 50세 전후 →
+**"소득 = 수명" 단순 결론의 반례.**
+
+```{r reg-scatter}
+#| fig-cap: "기대수명 vs 1인당 GDP (버블 = 인구, 점선 = 회귀선)"
+#| fig-height: 6.5
+plot(sub$gdpPercap, sub$lifeExp, log = "x", pch = 19,
+     col = pal[sub$continent], cex = sqrt(sub$pop) / 12000,
+     xlab = "1인당 GDP (log)", ylab = "기대수명",
+     main = sprintf("기대수명 vs 1인당 GDP (%d)", latest))
+xx <- seq(min(sub$gdpPercap), max(sub$gdpPercap), length.out = 100)
+lines(xx, predict(fit, data.frame(gdpPercap = xx)), col = "grey30", lwd = 2, lty = 2)
+legend("bottomright", legend = names(pal), col = pal, pch = 19, bty = "n")
+```
+
+# 세계 평균: 단순평균 vs 인구가중평균
+
+국가 단위 단순평균은 룩셈부르크와 중국을 동일 가중하므로 세계 인구의 실제 경험을
+왜곡한다. 인구가중평균과 비교한다.
+
+```{r weighted}
+#| fig-cap: "세계 평균 기대수명: 단순 vs 인구가중"
+umean <- tapply(df$lifeExp, df$year, mean)
+wmean <- sapply(years, function(y) {
+  d <- df[df$year == y, ]; weighted.mean(d$lifeExp, d$pop)
+})
+plot(years, umean, type = "o", pch = 19, col = "#984EA3", lwd = 2.5,
+     ylim = range(umean, wmean), xlab = "연도", ylab = "기대수명",
+     main = "세계 평균 기대수명: 단순 vs 인구가중")
+lines(years, wmean, type = "o", pch = 17, col = "#FF7F00", lwd = 2.5)
+legend("topleft", legend = c("단순평균(국가단위)", "인구가중평균"),
+       col = c("#984EA3", "#FF7F00"), pch = c(19, 17), lwd = 2.5, bty = "n")
+```
+
+# 대륙별 추세
+
+```{r continent-trend}
+#| fig-cap: "대륙별 평균 기대수명 추세"
+life_trend <- tapply(df$lifeExp, list(df$year, df$continent), mean)
+matplot(years, life_trend, type = "o", pch = 19, lty = 1, lwd = 2.5,
+        col = pal[colnames(life_trend)], xlab = "연도", ylab = "평균 기대수명",
+        main = "대륙별 평균 기대수명 추세")
+legend("bottomright", legend = colnames(life_trend),
+       col = pal[colnames(life_trend)], lwd = 2.5, bty = "n")
+```
+
+```{r gdp-trend}
+#| fig-cap: "대륙별 1인당 GDP 중앙값 추세 (log scale)"
+gdp_trend <- tapply(df$gdpPercap, list(df$year, df$continent), median)
+matplot(years, gdp_trend, type = "o", pch = 19, lty = 1, lwd = 2.5, log = "y",
+        col = pal[colnames(gdp_trend)], xlab = "연도",
+        ylab = "1인당 GDP 중앙값 (log)", main = "대륙별 1인당 GDP 추세")
+legend("topleft", legend = colnames(gdp_trend),
+       col = pal[colnames(gdp_trend)], lwd = 2.5, bty = "n")
+```
+
+# 국가 간 수렴 분석 — U자형 반전
+
+기대수명의 국가 간 표준편차는 1987년까지 줄다가(수렴) 이후 다시 커진다(발산).
+HIV/AIDS가 수십 년의 수렴 추세를 역전시켰다.
+
+```{r convergence}
+#| fig-cap: "국가 간 기대수명 표준편차 추이"
+disp <- data.frame(
+  year    = years,
+  sd      = round(tapply(df$lifeExp, df$year, sd), 2),
+  cv      = round(tapply(df$lifeExp, df$year, function(x) sd(x) / mean(x)), 3),
+  p90_p10 = round(tapply(df$lifeExp, df$year, function(x) diff(quantile(x, c(.1, .9)))), 1)
+)
+plot(disp$year, disp$sd, type = "o", pch = 19, col = "#377EB8", lwd = 2.5,
+     xlab = "연도", ylab = "국가 간 기대수명 표준편차",
+     main = "국가 간 기대수명 격차 (수렴 → 발산)")
+abline(v = disp$year[which.min(disp$sd)], lty = 2, col = "grey60")
+```
+
+```{r convergence-tab}
+kab(disp, row.names = FALSE, caption = "연도별 분산·변동계수·분위격차")
+```
+
+# 국가별 충격 자동 탐지
+
+연도간 기대수명 급락은 실제 역사적 비극(학살·기근·전염병)과 정확히 일치한다.
+
+```{r shocks}
+df$d_life <- ave(df$lifeExp, df$country, FUN = function(x) c(NA, diff(x)))
+shocks <- df[order(df$d_life), c("country", "year", "lifeExp", "d_life", "continent")]
+head(shocks[!is.na(shocks$d_life), ], 10) |>
+  kab(row.names = FALSE, digits = 1,
+      caption = "연도간 기대수명 급락 Top 10 (르완다 1992, 캄보디아 1977, 중국 1962 등)")
+```
+
+# 장기 변화 (1952 → 2007)
+
+```{r change}
+a <- df[df$year == earliest, c("country", "lifeExp")]
+b <- df[df$year == latest,   c("country", "lifeExp")]
+ch <- merge(a, b, by = "country", suffixes = c("_1952", "_2007"))
+ch$delta <- ch$lifeExp_2007 - ch$lifeExp_1952
+ch <- ch[order(-ch$delta), ]
+cat(sprintf("세계(단순평균) 기대수명: %.1f -> %.1f (+%.1f세)\n",
+            mean(a$lifeExp), mean(b$lifeExp), mean(b$lifeExp) - mean(a$lifeExp)))
+```
+
+```{r change-top}
+head(ch, 5) |> kab(row.names = FALSE, digits = 1, caption = "최대 증가 5개국")
+```
+
+```{r change-bottom}
+tail(ch, 5) |> kab(row.names = FALSE, digits = 1, caption = "최소/감소 5개국")
+```
+
+# 종합 결론
+
+1. **소득–수명은 강한 로그-선형 관계**(R² = 0.65)이나 만능이 아니다 — 보츠와나·적도기니 같은 고소득·저수명 반례 존재.
+2. **분포가 이봉 → 단봉으로 수렴**했고 세계 기대수명은 55년간 +17.9세 개선.
+3. **수렴은 영구적이지 않았다** — 1987년 정점 후 국가 간 격차가 다시 확대(발산), 주원인은 남부 아프리카 HIV/AIDS.
+4. **데이터 이상치 = 역사적 사건** — 르완다(1992), 캄보디아(1977), 중국(1962)의 급락이 실제 비극과 일치.
+5. **방법론 주의** — 국가 단위 단순평균은 인구 대국을 과소반영하므로 세계 추세는 인구가중평균 병행이 바람직. `pop`·`gdpPercap`은 모델링 전 로그 변환 권장.
+
+---
+
+```{r session}
+#| code-fold: true
+#| code-summary: "세션 정보 (재현성)"
+sessionInfo()
+```
