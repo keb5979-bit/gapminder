@@ -1,23 +1,27 @@
 ---
-title: "Gapminder EDA 대시보드"
+title: "Gapminder · 소득과 생명의 60년"
 author: "강은빈"
 date: "2026-06-27"
 lang: ko
 format:
   dashboard:
-    theme: cosmo
+    theme: [flatly, custom.scss]
+    nav-buttons:
+      - icon: github
+        href: https://github.com/keb5979-bit/gapminder
 execute:
   warning: false
   message: false
-knitr:
-  opts_chunk:
-    dev: "png"
-    dpi: 110
+  echo: false
 ---
 
 ```{r setup}
 #| include: false
+library(ggplot2)
+library(plotly)
+library(DT)
 options(scipen = 100)
+
 input_candidates <- c(file.path("data", "gapminder.csv"),
                       file.path("..", "data", "gapminder.csv"))
 input_path <- input_candidates[file.exists(input_candidates)][1]
@@ -26,183 +30,251 @@ stopifnot(!is.na(input_path))
 df <- read.csv(input_path, stringsAsFactors = FALSE, encoding = "UTF-8")
 df <- df[order(df$country, df$year), ]
 
-continents <- sort(unique(df$continent))
-pal <- setNames(
-  c("#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F00",
-    "#A65628", "#F781BF")[seq_along(continents)], continents)
 years    <- sort(unique(df$year))
 latest   <- max(years); earliest <- min(years)
-kab <- function(x, ...) knitr::kable(x, ...)
 
-# 핵심 지표 사전 계산 — 기대수명(생명) 중심
-n_country  <- length(unique(df$country))
-life_now   <- mean(df$lifeExp[df$year == latest])      # 2007년 세계 평균 기대수명
-life_past  <- mean(df$lifeExp[df$year == earliest])    # 1952년 세계 평균 기대수명
-life_gain  <- life_now - life_past                     # 55년간 증가폭
-sub        <- df[df$year == latest, ]
-life_max   <- sub[which.max(sub$lifeExp), ]            # 최장수국 (일본)
-life_min   <- sub[which.min(sub$lifeExp), ]            # 최단명국 (스와질란드)
-life_gap   <- life_max$lifeExp - life_min$lifeExp      # 최고-최저 격차
-fit        <- lm(lifeExp ~ log10(gdpPercap), data = sub)
-sub$resid  <- residuals(fit)
-r2         <- summary(fit)$r.squared
+# 전문적이고 색맹 친화적인 대륙 팔레트 (Tableau 계열)
+pal <- c(Africa   = "#E15759", Americas = "#F28E2B", Asia = "#4E79A7",
+         Europe   = "#59A14F", Oceania  = "#B07AA1")
+
+theme_gap <- function(base = 13) {
+  theme_minimal(base_size = base) +
+    theme(panel.grid.minor = element_blank(),
+          panel.grid.major = element_line(color = "#ececec"),
+          plot.title  = element_text(face = "bold"),
+          legend.position = "bottom",
+          legend.title = element_blank())
+}
+ax <- function(t) list(title = t, gridcolor = "#ededed", zeroline = FALSE)
+
+# 핵심 지표 (기대수명 = 생명 중심)
+life_now  <- mean(df$lifeExp[df$year == latest])
+life_gain <- life_now - mean(df$lifeExp[df$year == earliest])
+sub       <- df[df$year == latest, ]
+fit       <- lm(lifeExp ~ log10(gdpPercap), data = sub)
+sub$resid <- residuals(fit)
+life_gap  <- max(sub$lifeExp) - min(sub$lifeExp)
+top_life  <- sub[which.max(sub$lifeExp), ]
+bot_life  <- sub[which.min(sub$lifeExp), ]
 ```
 
 # 개요
 
-## Row {height="22%"}
+## Row {height="20%"}
 
 ```{r}
 #| content: valuebox
-#| title: "세계 평균 기대수명 (2007년)"
+#| title: "세계 평균 기대수명 (2007)"
 list(icon = "heart-pulse", color = "primary", value = sprintf("%.1f세", life_now))
 ```
 
 ```{r}
 #| content: valuebox
-#| title: "55년간 기대수명 증가 (1952→2007)"
+#| title: "55년간 기대수명 증가"
 list(icon = "graph-up-arrow", color = "success", value = sprintf("+%.1f세", life_gain))
 ```
 
 ```{r}
 #| content: valuebox
-#| title: "최고–최저 기대수명 격차 (2007년)"
-list(icon = "distribute-vertical", color = "danger",
-     value = sprintf("%.1f세", life_gap))
+#| title: "최고–최저 기대수명 격차 (2007)"
+list(icon = "rulers", color = "danger", value = sprintf("%.1f세", life_gap))
 ```
 
-## Row {height="78%"}
+## Row {height="80%"}
 
-### Column {width="42%"}
+### Column {width="70%"}
 
 ```{r}
-#| title: "기대수명 분포 변화 (국가 수): 이봉 → 단봉 수렴"
-brk <- c(0, 40, 50, 60, 70, 80, Inf)
-lab <- c("< 40", "40–50", "50–60", "60–70", "70–80", "80+")
-t52 <- table(cut(df$lifeExp[df$year == earliest], brk, lab, right = FALSE))
-t07 <- table(cut(df$lifeExp[df$year == latest],   brk, lab, right = FALSE))
-data.frame(`기대수명 구간` = lab,
-           `1952년` = as.integer(t52),
-           `2007년` = as.integer(t07),
-           check.names = FALSE) |>
-  kab(align = "lrr")
+#| title: "소득이 오르면 수명도 오른다 — 60년의 궤적 (▶ 재생 / 슬라이더 이동)"
+plot_ly(
+  df, x = ~gdpPercap, y = ~lifeExp, frame = ~year,
+  size = ~pop, color = ~continent, colors = pal,
+  text = ~paste0("<b>", country, "</b><br>기대수명: ", round(lifeExp, 1),
+                 "세<br>1인당 GDP: $", format(round(gdpPercap), big.mark = ","),
+                 "<br>인구: ", format(round(pop / 1e6, 1), nsmall = 1), "M"),
+  hoverinfo = "text", type = "scatter", mode = "markers",
+  marker = list(sizemode = "diameter", opacity = 0.72,
+                line = list(width = 0.5, color = "white")),
+  sizes = c(5, 60)
+) |>
+  layout(
+    xaxis = list(type = "log", title = "1인당 GDP (로그 척도, 국제달러)",
+                 gridcolor = "#ededed", zeroline = FALSE),
+    yaxis = list(title = "기대수명 (년)", range = c(20, 90),
+                 gridcolor = "#ededed", zeroline = FALSE),
+    legend = list(orientation = "h", x = 0, y = -0.18),
+    margin = list(t = 8)
+  ) |>
+  animation_opts(900, easing = "cubic-in-out", redraw = FALSE) |>
+  animation_slider(currentvalue = list(prefix = "연도 ",
+                                        font = list(size = 18, color = "#2c3e50"))) |>
+  config(displayModeBar = FALSE)
 ```
 
-### Column {width="58%"}
+### Column {width="30%"}
 
-```{r}
-#| title: "대륙별 평균 기대수명 추세 (연도별)"
-life_trend <- tapply(df$lifeExp, list(df$year, df$continent), mean)
-ct <- as.data.frame(round(t(life_trend), 1))
-ct <- cbind(`대륙` = rownames(ct), ct)
-kab(ct, row.names = FALSE, align = c("l", rep("r", length(years))))
-```
+::: {.card title="핵심 인사이트"}
+
+**1 · 소득–수명의 강한 연결**
+1인당 GDP(로그)와 기대수명의 상관은 **0.81**. 가난에서 벗어나면 수명이 가파르게 늘어난다.
+
+**2 · 세계는 가까워졌다**
+1952년 빈국(~40세)·부국(~70세)의 **두 무리**가, 2007년 우측 **한 무리**로 수렴.
+
+**3 · 그러나 균열**
+1990년대 남부 아프리카의 HIV/AIDS로 일부 국가는 **수명이 역행** — 소득만으론 설명되지 않는다.
+
+**4 · 여전한 격차**
+2007년 최장수 **`r top_life$country`(`r round(top_life$lifeExp,1)`세)** 와 최단명 **`r bot_life$country`(`r round(bot_life$lifeExp,1)`세)** 의 차이는 **`r round(life_gap,1)`세**.
+
+:::
 
 # 소득과 수명
 
 ## Row
 
-### Column {width="58%"}
+### Column {width="60%"}
 
 ```{r}
-#| title: "기대수명 vs 1인당 GDP (버블=인구, 점선=회귀선)"
-plot(sub$gdpPercap, sub$lifeExp, log = "x", pch = 19,
-     col = pal[sub$continent], cex = sqrt(sub$pop) / 12000,
-     xlab = "1인당 GDP (log)", ylab = "기대수명")
-xx <- seq(min(sub$gdpPercap), max(sub$gdpPercap), length.out = 100)
-lines(xx, predict(fit, data.frame(gdpPercap = xx)), col = "grey30", lwd = 2, lty = 2)
-legend("bottomright", legend = names(pal), col = pal, pch = 19, bty = "n")
+#| title: "기대수명 vs 1인당 GDP (2007) — 회귀선에서 벗어난 국가에 주목"
+xx <- 10^seq(log10(min(sub$gdpPercap)), log10(max(sub$gdpPercap)), length.out = 120)
+yy <- predict(fit, data.frame(gdpPercap = xx))
+plot_ly(sub, x = ~gdpPercap, y = ~lifeExp, color = ~continent, colors = pal,
+        size = ~pop, sizes = c(6, 48),
+        text = ~paste0("<b>", country, "</b><br>기대수명 ", round(lifeExp, 1),
+                       "세<br>잔차 ", sprintf("%+.1f", resid), "세"),
+        hoverinfo = "text", type = "scatter", mode = "markers",
+        marker = list(opacity = 0.75, line = list(width = 0.5, color = "white"))) |>
+  add_lines(x = xx, y = yy, inherit = FALSE, name = "회귀선",
+            line = list(color = "#555", dash = "dash"), hoverinfo = "skip") |>
+  layout(xaxis = list(type = "log", title = "1인당 GDP (로그)",
+                      gridcolor = "#ededed", zeroline = FALSE),
+         yaxis = list(title = "기대수명 (년)", gridcolor = "#ededed", zeroline = FALSE),
+         legend = list(orientation = "h", x = 0, y = -0.18)) |>
+  config(displayModeBar = FALSE)
 ```
 
-### Column {width="42%"}
+### Column {width="40%"}
 
 ```{r}
-#| title: "소득 대비 수명 ↑ (양의 잔차)"
-head(sub[order(-sub$resid), c("country", "gdpPercap", "lifeExp", "resid")], 5) |>
-  kab(row.names = FALSE, digits = 1)
+#| title: "소득으로 설명되지 않는 국가 (회귀 잔차 기준)"
+resid_tab <- rbind(
+  cbind(유형 = "기대 이상 ▲", head(sub[order(-sub$resid), ], 5)),
+  cbind(유형 = "기대 이하 ▼", head(sub[order(sub$resid), ], 5))
+)[, c("유형", "country", "continent", "gdpPercap", "lifeExp", "resid")]
+
+datatable(resid_tab, rownames = FALSE,
+          colnames = c("유형", "국가", "대륙", "1인당GDP", "기대수명", "잔차"),
+          options = list(dom = "t", pageLength = 10, ordering = FALSE,
+                         columnDefs = list(list(className = "dt-center", targets = "_all")))) |>
+  formatRound("gdpPercap", 0) |>
+  formatRound(c("lifeExp", "resid"), 1) |>
+  formatStyle("유형",
+              color = styleEqual(c("기대 이상 ▲", "기대 이하 ▼"), c("#2e7d32", "#c62828")),
+              fontWeight = "bold")
 ```
 
-```{r}
-#| title: "소득 대비 수명 ↓ (음의 잔차, HIV 직격)"
-head(sub[order(sub$resid), c("country", "gdpPercap", "lifeExp", "resid")], 5) |>
-  kab(row.names = FALSE, digits = 1)
-```
-
-# 수렴과 충격
+# 추세와 수렴
 
 ## Row {height="55%"}
 
 ### Column
 
 ```{r}
-#| title: "국가 간 기대수명 격차 (수렴 → 발산)"
-disp <- data.frame(
-  year = years,
-  sd   = as.numeric(tapply(df$lifeExp, df$year, sd))
-)
-plot(disp$year, disp$sd, type = "o", pch = 19, col = "#377EB8", lwd = 2.5,
-     xlab = "연도", ylab = "국가 간 기대수명 표준편차")
-abline(v = disp$year[which.min(disp$sd)], lty = 2, col = "grey60")
+#| title: "대륙별 평균 기대수명 (1952–2007)"
+lt <- aggregate(lifeExp ~ year + continent, df, mean)
+g1 <- ggplot(lt, aes(year, lifeExp, color = continent, group = continent,
+                     text = paste0(continent, "<br>", year, ": ", round(lifeExp, 1), "세"))) +
+  geom_line(linewidth = 1) + geom_point(size = 1.4) +
+  scale_color_manual(values = pal) + theme_gap() +
+  labs(x = NULL, y = "평균 기대수명 (년)")
+ggplotly(g1, tooltip = "text") |> config(displayModeBar = FALSE) |>
+  layout(legend = list(orientation = "h", y = -0.15))
 ```
 
 ### Column
 
 ```{r}
-#| title: "연도별 GDP–수명 상관계수 추이"
-cor_by_year <- sapply(years, function(y) {
-  d <- df[df$year == y, ]; cor(d$lifeExp, log10(d$gdpPercap))
-})
-plot(years, cor_by_year, type = "o", pch = 19, col = "#4DAF4A", lwd = 2.5,
-     ylim = c(0.7, 0.9), xlab = "연도", ylab = "상관계수")
-abline(v = years[which.max(cor_by_year)], lty = 2, col = "grey60")
+#| title: "대륙별 1인당 GDP 중앙값 (로그 척도)"
+gt <- aggregate(gdpPercap ~ year + continent, df, median)
+g2 <- ggplot(gt, aes(year, gdpPercap, color = continent, group = continent,
+                     text = paste0(continent, "<br>", year, ": $",
+                                   format(round(gdpPercap), big.mark = ",")))) +
+  geom_line(linewidth = 1) + geom_point(size = 1.4) +
+  scale_color_manual(values = pal) +
+  scale_y_log10(labels = scales::label_dollar()) + theme_gap() +
+  labs(x = NULL, y = "1인당 GDP 중앙값 (로그)")
+ggplotly(g2, tooltip = "text") |> config(displayModeBar = FALSE) |>
+  layout(legend = list(orientation = "h", y = -0.15))
 ```
 
 ## Row {height="45%"}
 
-### Column
+### Column {width="62%"}
 
 ```{r}
-#| title: "기대수명 급락 충격 Top 10 (역사적 사건과 일치)"
-df$d_life <- ave(df$lifeExp, df$country, FUN = function(x) c(NA, diff(x)))
-shocks <- df[order(df$d_life), c("country", "year", "lifeExp", "d_life", "continent")]
-head(shocks[!is.na(shocks$d_life), ], 10) |>
-  kab(row.names = FALSE, digits = 1)
+#| title: "국가 간 기대수명 격차: 수렴하다 다시 벌어지다 (U자형)"
+disp <- data.frame(year = years, sd = as.numeric(tapply(df$lifeExp, df$year, sd)))
+peak <- disp$year[which.min(disp$sd)]
+g3 <- ggplot(disp, aes(year, sd)) +
+  geom_area(fill = "#4E79A7", alpha = 0.12) +
+  geom_line(linewidth = 1.1, color = "#4E79A7") +
+  geom_point(size = 1.6, color = "#4E79A7") +
+  geom_vline(xintercept = peak, linetype = "dashed", color = "#c62828") +
+  annotate("text", x = peak, y = max(disp$sd), hjust = -0.05, vjust = 1,
+           label = paste0(peak, " 수렴 정점\n이후 발산 (HIV/AIDS)"),
+           color = "#c62828", size = 3.6, fontface = "bold") +
+  theme_gap() + labs(x = NULL, y = "국가 간 기대수명 표준편차")
+ggplotly(g3, tooltip = c("x", "y")) |> config(displayModeBar = FALSE)
 ```
 
-### Column
+### Column {width="38%"}
 
-```{r}
-#| title: "장기 변화 최대 증가 / 감소 (1952 → 2007)"
-a <- df[df$year == earliest, c("country", "lifeExp")]
-b <- df[df$year == latest,   c("country", "lifeExp")]
-ch <- merge(a, b, by = "country", suffixes = c("_52", "_07"))
-ch$delta <- ch$lifeExp_07 - ch$lifeExp_52
-ch <- ch[order(-ch$delta), ]
-rbind(head(ch, 5), tail(ch, 5)) |>
-  kab(row.names = FALSE, digits = 1)
-```
+::: {.card title="수렴과 발산의 의미"}
 
-# 대륙별
+표준편차가 **줄면** 국가 간 기대수명이 **비슷해진다**(수렴), **늘면** 다시 **벌어진다**(발산).
+
+- **1952→`r peak`:** 빈국이 빠르게 따라잡으며 격차 축소
+- **`r peak`→2007:** 남부 아프리카의 HIV/AIDS 위기로 격차 재확대
+
+수십 년의 진보가 **영구적이지 않을 수 있음**을 보여주는 경고 신호다.
+
+:::
+
+# 위기의 흔적
 
 ## Row
 
-### Column
+### Column {width="52%"}
 
 ```{r}
-#| title: "대륙별 평균 기대수명 추세"
-matplot(years, life_trend, type = "o", pch = 19, lty = 1, lwd = 2.5,
-        col = pal[colnames(life_trend)], xlab = "연도", ylab = "평균 기대수명")
-legend("bottomright", legend = colnames(life_trend),
-       col = pal[colnames(life_trend)], lwd = 2.5, bty = "n")
+#| title: "기대수명 급락 Top 10 — 데이터가 기록한 역사적 비극"
+df$d_life <- ave(df$lifeExp, df$country, FUN = function(x) c(NA, diff(x)))
+ev <- c(Rwanda = "내전·집단학살", Cambodia = "크메르루주", China = "대약진운동 기근",
+        Zimbabwe = "HIV/AIDS", Lesotho = "HIV/AIDS", Swaziland = "HIV/AIDS",
+        Botswana = "HIV/AIDS", Namibia = "HIV/AIDS", `South Africa` = "HIV/AIDS")
+shk <- head(df[order(df$d_life), c("country", "year", "lifeExp", "d_life", "continent")], 10)
+shk$event <- ifelse(is.na(ev[shk$country]), "—", ev[shk$country])
+datatable(shk[, c("country", "year", "d_life", "lifeExp", "event")],
+          rownames = FALSE,
+          colnames = c("국가", "연도", "변화(년)", "기대수명", "추정 원인"),
+          options = list(dom = "t", pageLength = 10,
+                         columnDefs = list(list(className = "dt-center", targets = 0:3)))) |>
+  formatRound(c("d_life", "lifeExp"), 1) |>
+  formatStyle("d_life", color = "#c62828", fontWeight = "bold")
 ```
 
-### Column
+### Column {width="48%"}
 
 ```{r}
-#| title: "대륙별 1인당 GDP 중앙값 추세 (log)"
-gdp_trend <- tapply(df$gdpPercap, list(df$year, df$continent), median)
-matplot(years, gdp_trend, type = "o", pch = 19, lty = 1, lwd = 2.5, log = "y",
-        col = pal[colnames(gdp_trend)], xlab = "연도", ylab = "1인당 GDP (log)")
-legend("topleft", legend = colnames(gdp_trend),
-       col = pal[colnames(gdp_trend)], lwd = 2.5, bty = "n")
+#| title: "비극의 궤적 — 충격을 겪은 국가들의 기대수명"
+sel <- c("Rwanda", "Zimbabwe", "Cambodia", "China", "Botswana")
+ds <- df[df$country %in% sel, ]
+g4 <- ggplot(ds, aes(year, lifeExp, color = country, group = country,
+                     text = paste0(country, "<br>", year, ": ", round(lifeExp, 1), "세"))) +
+  geom_line(linewidth = 1) + geom_point(size = 1.3) +
+  scale_color_brewer(palette = "Dark2") + theme_gap() +
+  labs(x = NULL, y = "기대수명 (년)")
+ggplotly(g4, tooltip = "text") |> config(displayModeBar = FALSE) |>
+  layout(legend = list(orientation = "h", y = -0.15))
 ```

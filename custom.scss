@@ -1,0 +1,46 @@
+/*-- scss:defaults --*/
+// 색상 — 차분하고 전문적인 톤
+$primary:   #2c5f8a;
+$success:   #2e7d32;
+$danger:    #c62828;
+$body-bg:   #f6f7f9;
+$card-bg:   #ffffff;
+
+// 타이포그래피
+$font-family-sans-serif: "Pretendard", "Segoe UI", "Malgun Gothic", system-ui, -apple-system, sans-serif;
+$h1-font-size: 1.5rem;
+
+/*-- scss:rules --*/
+
+// 네비게이션 바 — 그라데이션 강조
+.navbar {
+  background: linear-gradient(90deg, #1f4e6b 0%, #2c5f8a 100%) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.navbar .navbar-brand,
+.navbar .nav-link { color: #f3f6f9 !important; font-weight: 600; }
+.navbar .nav-link.active { color: #ffffff !important; border-bottom: 2px solid #ffd166; }
+
+// 카드 — 부드러운 그림자와 헤더 강조
+.card {
+  border: none;
+  border-radius: 10px;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.07);
+}
+.card-header {
+  background: #fbfcfd;
+  border-bottom: 1px solid #eef1f4;
+  font-weight: 600;
+  color: #2c3e50;
+  letter-spacing: -0.01em;
+}
+
+// 밸류박스 — 크고 또렷한 수치
+.valuebox-grid .value-box-value { font-weight: 700; font-size: 2.1rem; }
+.value-box-area { padding: 0.6rem 1rem; }
+
+// 인사이트 카드 본문 가독성
+.card-body p { line-height: 1.55; }
+
+// 데이터테이블 톤 다운
+table.dataTable thead th { background: #f4f6f8; color: #2c3e50; }
